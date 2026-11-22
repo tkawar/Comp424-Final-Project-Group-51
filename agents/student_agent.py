@@ -7,6 +7,20 @@ from constants import *
 import numpy as np
 import time
 
+# copied from greedy 
+def after(board, reserves, player, move):
+    """Return the position after `player` plays `move`. The original arrays are not changed.
+
+    Takes:   board, reserves - the position before the move.
+             player          - the player who moves, 1 or 2.
+             move            - a legal Move for that player.
+    Returns: (board, reserves), new arrays with the move played.
+    Example: b2, r2 = after(board, reserves, 1, Move(None, (0, 0), LARGE))
+    """
+    b, r = copy_state(board, reserves)
+    execute_move(b, r, player, move)
+    return b, r
+
 @register_agent("student_agent")          # do not change this string
 class StudentAgent(Agent):
     def __init__(self):
@@ -14,17 +28,84 @@ class StudentAgent(Agent):
         within INIT_TIME_LIMIT seconds."""
         super().__init__()
         self.name = "StudentAgent"
+        self.rng = np.random.default_rng() # randomly selected to keep a fall back step
 
+    # def step(self, board, reserves, player, opponent):
+    #     """Return the Move you want to play.
+
+    #     Takes: board, reserves - your own copies of the current position.
+    #            player, opponent - your player number (1 or 2) and the other one.
+    #     Agent.step in agents/agent.py explains each argument and the time limit.
+    #     """
+    #     start = time.perf_counter()
+    #     # ALLOW_MOVES and WIN_LENGTH (from constants) are the rule flags of this game.
+    #     # helpers.get_valid_moves / check_winner already respect them; your own
+    #     # move generator and evaluation function must too.
+    #     # TODO: replace with your search. Keep (time.perf_counter() - start) < STEP_TIME_LIMIT - margin.
+    #     return random_move(board, reserves, player)
+
+    
+    # copied from greedy and modified to include time limit and fallback move
     def step(self, board, reserves, player, opponent):
-        """Return the Move you want to play.
+        deadline = time.perf_counter() + STEP_TIME_LIMIT - 0.2
 
-        Takes: board, reserves - your own copies of the current position.
-               player, opponent - your player number (1 or 2) and the other one.
-        Agent.step in agents/agent.py explains each argument and the time limit.
-        """
-        start = time.perf_counter()
-        # ALLOW_MOVES and WIN_LENGTH (from constants) are the rule flags of this game.
-        # helpers.get_valid_moves / check_winner already respect them; your own
-        # move generator and evaluation function must too.
-        # TODO: replace with your search. Keep (time.perf_counter() - start) < STEP_TIME_LIMIT - margin.
-        return random_move(board, reserves, player)
+        moves = get_valid_moves(board, reserves, player)
+        fallback = moves[int(self.rng.integers(len(moves)))]
+
+        # First, check every move for an immediate win.
+        candidates = []
+
+        for move in moves:
+            if time.perf_counter() >= deadline:
+                return fallback
+
+            next_board, next_reserves = after(
+                board, reserves, player, move
+            )
+
+            winner = check_winner(next_board, player)
+
+            if winner == player:
+                return move
+
+            # Exclude moves that immediately give the opponent a win.
+            if winner != opponent:
+                candidates.append((move, next_board, next_reserves))
+
+        # Then, look for moves that allow no immediate winning reply.
+        safe = []
+
+        for move, next_board, next_reserves in candidates:
+            if time.perf_counter() >= deadline:
+                break
+
+            opponent_can_win = False
+
+            replies = get_valid_moves(
+                next_board, next_reserves, opponent
+            )
+
+            for reply in replies:
+                if time.perf_counter() >= deadline:
+                    # This candidate has not been fully checked.
+                    return safe[0] if safe else fallback
+
+                reply_board, _ = after(
+                    next_board, next_reserves, opponent, reply
+                )
+
+                if check_winner(reply_board, opponent) == opponent:
+                    opponent_can_win = True
+                    break
+
+            if not opponent_can_win:
+                safe.append(move)
+
+        if safe:
+            return safe[int(self.rng.integers(len(safe)))]
+
+        # Prefer a move that does not immediately expose a losing line.
+        if candidates:
+            return candidates[int(self.rng.integers(len(candidates)))][0]
+
+        return fallback
