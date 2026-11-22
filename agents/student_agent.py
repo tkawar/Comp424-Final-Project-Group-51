@@ -1,8 +1,11 @@
 """Student agent: edit ONLY this file."""
+from shutil import move
+
 from agents.agent import Agent
 from store import register_agent
 from helpers import (Move, get_valid_moves, execute_move, check_winner,
-                     check_endgame, random_move, copy_state, top_view)
+                     check_endgame, random_move, copy_state, top_view, LINES)
+#added a new import "LINES"
 from constants import *
 import numpy as np
 import time
@@ -20,6 +23,11 @@ def after(board, reserves, player, move):
     b, r = copy_state(board, reserves)
     execute_move(b, r, player, move)
     return b, r
+
+def eval(board, reserves, player):
+    """Evaluate the position for `player`. Return a number: higher is better for `player`."""
+    score = 0
+    return score
 
 @register_agent("student_agent")          # do not change this string
 class StudentAgent(Agent):
@@ -63,6 +71,8 @@ class StudentAgent(Agent):
                 board, reserves, player, move
             )
 
+            score = eval(next_board, next_reserves, player)
+
             winner = check_winner(next_board, player)
 
             if winner == player:
@@ -74,7 +84,8 @@ class StudentAgent(Agent):
 
         # Then, look for moves that allow no immediate winning reply.
         safe = []
-
+        best_move = None
+        best_score = float("-inf") 
         for move, next_board, next_reserves in candidates:
             if time.perf_counter() >= deadline:
                 break
@@ -88,7 +99,7 @@ class StudentAgent(Agent):
             for reply in replies:
                 if time.perf_counter() >= deadline:
                     # This candidate has not been fully checked.
-                    return safe[0] if safe else fallback
+                    return best_move if best_move is not None else fallback
 
                 reply_board, _ = after(
                     next_board, next_reserves, opponent, reply
@@ -101,11 +112,20 @@ class StudentAgent(Agent):
             if not opponent_can_win:
                 safe.append(move)
 
-        if safe:
-            return safe[int(self.rng.integers(len(safe)))]
+                score = eval(next_board, next_reserves, player)
+
+                if score > best_score:
+                    best_score = score
+                    best_move = move
+
+        if best_move is not None:
+            return best_move
+           
+        
 
         # Prefer a move that does not immediately expose a losing line.
         if candidates:
             return candidates[int(self.rng.integers(len(candidates)))][0]
 
         return fallback
+    
