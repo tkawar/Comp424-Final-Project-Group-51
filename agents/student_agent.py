@@ -25,8 +25,29 @@ def after(board, reserves, player, move):
     return b, r
 
 def eval(board, reserves, player):
-    """Evaluate the position for `player`. Return a number: higher is better for `player`."""
+    """Evaluate the position, return a number: higher is better for `player`."""
+    opponent = 3-player #since its player 1 or 2, subtracting from 3 gives the other player
+    owners, _ = top_view(board) #as a start we ignore the size, 
+    #top_view returns two arrays, one for owners and one for sizes
+
     score = 0
+    weights = (0,1,10, 100, 1000) #weights need to be fine tuned later
+
+    for line in LINES[WIN_LENGTH]:
+        #used LINES as it loops through all lines of length 4 in the grid
+        cells = [owners[i,j] for i,j in line]
+        if OBSTACLE in cells:
+            #we cant win on a line with an obstacle
+            continue
+
+        my_count = sum(owner == player for owner in cells)
+        opp_count = sum(owner == opponent for owner in cells)
+
+        if my_count > 0 and opp_count == 0:
+            score += weights[my_count]
+        elif opp_count > 0 and my_count == 0:
+            score -= weights[opp_count] 
+    
     return score
 
 @register_agent("student_agent")          # do not change this string
