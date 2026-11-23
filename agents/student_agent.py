@@ -1,5 +1,4 @@
 """Student agent: edit ONLY this file."""
-from shutil import move
 
 from agents.agent import Agent
 from store import register_agent
