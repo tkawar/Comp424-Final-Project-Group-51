@@ -81,7 +81,7 @@ class StudentAgent(Agent):
         moves = get_valid_moves(board, reserves, player)
         fallback = moves[int(self.rng.integers(len(moves)))]
 
-        # First, check every move for an immediate win.
+        #check every move for an immediate win.
         candidates = []
 
         for move in moves:
@@ -99,11 +99,11 @@ class StudentAgent(Agent):
             if winner == player:
                 return move
 
-            # Exclude moves that immediately give the opponent a win.
+            # avoid moves that immediately give opp a win.
             if winner != opponent:
                 candidates.append((move, next_board, next_reserves))
 
-        # Then, look for moves that allow no immediate winning reply.
+        #look for moves that allow no immediate winning reply.
         safe = []
         best_move = None
         best_score = float("-inf") 
@@ -144,7 +144,7 @@ class StudentAgent(Agent):
            
         
 
-        # Prefer a move that does not immediately expose a losing line.
+        # favor a move that does not immediately expose a losing line.
         if candidates:
             return candidates[int(self.rng.integers(len(candidates)))][0]
 
