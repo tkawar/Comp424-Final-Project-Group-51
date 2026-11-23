@@ -33,7 +33,7 @@ def eval(board, reserves, player):
     weights = (0,1,10, 100, 1000) #weights need to be fine tuned later
 
     for line in LINES[WIN_LENGTH]:
-        #used LINES as it loops through all lines of length 4 in the grid
+        #used LINES as it loops through all lines of length 4 (WIN_LENGTH) in the grid
         cells = [owners[i,j] for i,j in line]
         if OBSTACLE in cells:
             #we cant win on a line with an obstacle
@@ -56,7 +56,7 @@ def order_moves(board, reserves, player, moves, perferred_move):
     return get_valid_moves(board, reserves, player)
 
 def minimax(board, reserves, player_to_move, root_player, depth, ply, alpha, beta, deadline):
-    """Return the best move for `player` using minimax with alpha-beta pruning."""
+    """Return the best move for `root_player` using minimax with alpha-beta pruning."""
 
     #this is VSCode generated, ill fix it up later, 
     # place holder for now
@@ -68,43 +68,58 @@ def minimax(board, reserves, player_to_move, root_player, depth, ply, alpha, bet
     #update alpha and beta, prune if possible (alpha>= beta)
     #return score
     if time.perf_counter() >= deadline:
-        return None, eval(board, reserves, player_to_move)
+        raise TimeoutError("Time limit exceeded in minimax")
 
-    winner = check_winner(board, player_to_move)
-    if winner == player_to_move:
-        return None, float("inf")
-    elif winner == 3 - player_to_move:
-        return None, float("-inf")
-    elif check_endgame(board, reserves):
-        return None, 0
+    game_over, winner, _ = check_endgame(board, reserves, player_to_move, ply)
+    if game_over:
+        if winner == root_player:
+            return 10000000
+        elif winner == 0: 
+            return 0
+        else:
+            return -10000000
 
     if depth == 0:
-        return None, eval(board, reserves, player_to_move)
+        return eval(board, reserves, root_player)
 
     moves = get_valid_moves(board, reserves, player_to_move)
-    best_move = None
-    best_score = float("-inf")
+
+    turn = player_to_move == root_player
+
+    if turn:
+        best_score = float("-inf")
+    else: 
+        best_score = float("inf")
+
 
     for move in moves:
-        next_board, next_reserves = after(board, reserves, player_to_move, move)
-        _, score = minimax(next_board, next_reserves, 3 - player_to_move, moves, depth - 1, -beta, -alpha, deadline)
-        score = -score
+        if time.perf_counter() >= deadline:
+            raise TimeoutError("Time limit exceeded in minimax")
+        
+        next_board, next_reserves = after(board, reserves, player_to_move, move) 
+        score = minimax(next_board, next_reserves, 3 - player_to_move, root_player, depth - 1, ply+1, beta, alpha, deadline)
+        if turn:
+            best_score = max(best_score, score)
+        else:
+            best_score = min(best_score, score)
 
-        if score > best_score:
-            best_score = score
-            best_move = move
+    return best_score
 
-        alpha = max(alpha, score)
-        if beta <= alpha:
-            break
+    # will implememnt this later, for now we will use the eval function to score moves
+    #     if score > best_score:
+    #         best_score = score
+    #         best_move = move
 
-    return best_move, best_score
+    #     alpha = max(alpha, score)
+    #     if beta <= alpha:
+    #         break
+
+    # return best_move, best_score
 
 def search(board, reserves, player, depth, ply, deadline, preferred_move=None):
     """Return the best move for `player` using minimax with alpha-beta pruning."""
     # VSCdode generated, ill fix it up later, place holder for now
-    best_move, _ = minimax(board, reserves, player, player, depth, ply, float("-inf"), float("inf"), deadline)
-    return best_move
+    return 
 
 @register_agent("student_agent")          # do not change this string
 class StudentAgent(Agent):
@@ -114,6 +129,7 @@ class StudentAgent(Agent):
         super().__init__()
         self.name = "StudentAgent"
         self.rng = np.random.default_rng() # randomly selected to keep a fall back step
+        self.turn_count = 0 #keep track of the turn count to adjust depth of search
 
     # def step(self, board, reserves, player, opponent):
     #     """Return the Move you want to play.
@@ -134,76 +150,34 @@ class StudentAgent(Agent):
     def step(self, board, reserves, player, opponent):
         #after implementing each of the above, fix up step() to use them.
         deadline = time.perf_counter() + STEP_TIME_LIMIT - 0.2
+        depth_limit = 2
+
+        ply = 2 * self.turn_count + player -1
+        self.turn_count += 1
 
         moves = get_valid_moves(board, reserves, player)
-        fallback = moves[int(self.rng.integers(len(moves)))]
+        best_move = moves[int(self.rng.integers(len(moves)))] #prev named fallback
+        best_score = float("-inf")
 
-        #check every move for an immediate win.
-        candidates = []
 
-        for move in moves:
-            if time.perf_counter() >= deadline:
-                return fallback
-
-            next_board, next_reserves = after(
-                board, reserves, player, move
-            )
-
-            score = eval(next_board, next_reserves, player)
-
-            winner = check_winner(next_board, player)
-
-            if winner == player:
-                return move
-
-            # avoid moves that immediately give opp a win.
-            if winner != opponent:
-                candidates.append((move, next_board, next_reserves))
-
-        #look for moves that allow no immediate winning reply.
-        safe = []
-        best_move = None
-        best_score = float("-inf") 
-        for move, next_board, next_reserves in candidates:
-            if time.perf_counter() >= deadline:
-                break
-
-            opponent_can_win = False
-
-            replies = get_valid_moves(
-                next_board, next_reserves, opponent
-            )
-
-            for reply in replies:
+        try:
+            for move in moves:
                 if time.perf_counter() >= deadline:
-                    # This candidate has not been fully checked.
-                    return best_move if best_move is not None else fallback
+                    raise TimeoutError("Time limit exceeded in step")
 
-                reply_board, _ = after(
-                    next_board, next_reserves, opponent, reply
+                next_board, next_reserves = after(
+                    board, reserves, player, move
                 )
 
-                if check_winner(reply_board, opponent) == opponent:
-                    opponent_can_win = True
-                    break
-
-            if not opponent_can_win:
-                safe.append(move)
-
-                score = eval(next_board, next_reserves, player)
-
+                score = minimax(next_board, next_reserves, opponent, player, depth_limit-1, ply+1, float("-inf"), float("inf"), deadline)
                 if score > best_score:
                     best_score = score
                     best_move = move
+                if best_score == 10000000:
+                    break
 
-        if best_move is not None:
-            return best_move
-           
+        except TimeoutError:
+            pass
         
-
-        # favor a move that does not immediately expose a losing line.
-        if candidates:
-            return candidates[int(self.rng.integers(len(candidates)))][0]
-
-        return fallback
+        return best_move
     
