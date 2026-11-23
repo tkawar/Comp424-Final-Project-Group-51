@@ -50,6 +50,63 @@ def eval(board, reserves, player):
     
     return score
 
+def order_moves(board, reserves, player, moves, perferred_move):
+    """Return a list of moves in order of preference. This is a placeholder for now."""
+    #orders moves by promising moves first
+
+    return get_valid_moves(board, reserves, player)
+
+def minimax(board, reserves, player_to_move, root_player, depth, ply, alpha, beta, deadline):
+    """Return the best move for `player` using minimax with alpha-beta pruning."""
+
+    #this is VSCode generated, ill fix it up later, 
+    # place holder for now
+
+    #check for time limit
+    #check for win, loss, draw
+    # at depth zero, call eval(),
+    # simulate moves and search recursively
+    #update alpha and beta, prune if possible (alpha>= beta)
+    #return score
+    if time.perf_counter() >= deadline:
+        return None, eval(board, reserves, player_to_move)
+
+    winner = check_winner(board, player_to_move)
+    if winner == player_to_move:
+        return None, float("inf")
+    elif winner == 3 - player_to_move:
+        return None, float("-inf")
+    elif check_endgame(board, reserves):
+        return None, 0
+
+    if depth == 0:
+        return None, eval(board, reserves, player_to_move)
+
+    moves = get_valid_moves(board, reserves, player_to_move)
+    best_move = None
+    best_score = float("-inf")
+
+    for move in moves:
+        next_board, next_reserves = after(board, reserves, player_to_move, move)
+        _, score = minimax(next_board, next_reserves, 3 - player_to_move, moves, depth - 1, -beta, -alpha, deadline)
+        score = -score
+
+        if score > best_score:
+            best_score = score
+            best_move = move
+
+        alpha = max(alpha, score)
+        if beta <= alpha:
+            break
+
+    return best_move, best_score
+
+def search(board, reserves, player, depth, ply, deadline, preferred_move=None):
+    """Return the best move for `player` using minimax with alpha-beta pruning."""
+    # VSCdode generated, ill fix it up later, place holder for now
+    best_move, _ = minimax(board, reserves, player, player, depth, ply, float("-inf"), float("inf"), deadline)
+    return best_move
+
 @register_agent("student_agent")          # do not change this string
 class StudentAgent(Agent):
     def __init__(self):
@@ -76,6 +133,7 @@ class StudentAgent(Agent):
     
     # copied from greedy and modified to include time limit and fallback move
     def step(self, board, reserves, player, opponent):
+        #after implementing each of the above, fix up step() to use them.
         deadline = time.perf_counter() + STEP_TIME_LIMIT - 0.2
 
         moves = get_valid_moves(board, reserves, player)
