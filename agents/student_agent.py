@@ -605,7 +605,18 @@ class StudentAgent(Agent):
 
 
             # ---- 4. Rare case: no moves in the lists.
-            # TO DO
+            if not captures and not quiet:
+                # Try again, this time also allowing moves that cover my own pieces.
+                winning_move, captures, quiet, losing_move = find_moves(side, True, True)
+                if not captures and not quiet:
+                    if losing_move: # every move uncovers the opponent's line
+                        if ply == 0:
+                            best_root_move = losing_move
+                            return -(WIN_SCORE - ply - 1)
+                        if can_move_pieces: # no legal move at all: the rules say I lose
+                            return -(WIN_SCORE - ply)
+                        # Without board moves, having no move just passes the turn.
+                    return -negamax(1 - side, depth, -beta, -alpha, ply + 1, key ^ TURN_KEY)
 
             # ---- 5. Put the moves in a good order. Alpha-beta prunes the most when the best
             # move is tried first. Order: the best move from the table, then captures, then
