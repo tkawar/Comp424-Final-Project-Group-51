@@ -26,7 +26,7 @@ _WIN = 1_000_000                      # score of a win at the root; a win n plie
 _MATE = _WIN - 1000                   # any score beyond this is a proven win or loss
 _INF = 10 * _WIN
 
-_TIME_FRACTION = 0.82                 # share of STEP_TIME_LIMIT the search may use
+_TIME_FRACTION = 0.75                 # share of STEP_TIME_LIMIT the search may use
 _TT_MAX = 300_000                     # transposition table entries kept between moves
 _EXT_LIMIT = 4                        # extra plies searched while the side to move is under threat
 _LMR_FROM = 4                         # quiet moves after this many are searched one ply shallower
@@ -143,6 +143,8 @@ class StudentAgent(Agent):
         self.calls = 0                                # number of step() calls so far
         self.last_depth = 0                           # depth finished by the last search (for tests)
         self.last_nodes = 0
+        self.last_stats = (0, 0, 0)                   # table cutoffs, beta cutoffs, cutoffs by the first move
+        self.fallbacks = 0                            # times the search gave no usable move
 
     # ------------------------------------------------------------------ the entry point
 
@@ -168,6 +170,7 @@ class StudentAgent(Agent):
         finally:
             if was_enabled:
                 gc.enable()
+        self.fallbacks += 1
         return fallback
 
     @staticmethod
@@ -261,6 +264,7 @@ class StudentAgent(Agent):
         tt_get = tt.get
         nodes = 0
         root_best = 0
+        tt_cuts = beta_cuts = first_cuts = 0
 
         def gen(side, build, full):
             """Look at the moves of `side`. Return (win, captures, quiet, loser).
@@ -435,7 +439,7 @@ class StudentAgent(Agent):
 
         def negamax(side, depth, alpha, beta, ply, key):
             """Return the value for `side`, to move in a position where nobody has a line."""
-            nonlocal nodes, root_best
+            nonlocal nodes, root_best, tt_cuts, beta_cuts, first_cuts
             nodes += 1
             if not nodes & 1023 and (perf() > deadline or (NODE_LIMIT and nodes >= NODE_LIMIT)):
                 raise _Timeout
@@ -454,11 +458,14 @@ class StudentAgent(Agent):
                         elif ev < -_MATE:
                             ev += ply
                         if ef == _EXACT:
+                            tt_cuts += 1
                             return ev
                         if ef == _LOWER:
                             if ev >= beta:
+                                tt_cuts += 1
                                 return ev
                         elif ev <= alpha:
+                            tt_cuts += 1
                             return ev
                 win, caps, quiet, loser = gen(side, True, False)
             else:
@@ -565,6 +572,9 @@ class StudentAgent(Agent):
                         if ply == 0:
                             root_best = m
                         if v >= beta:
+                            beta_cuts += 1
+                            if i == 0:
+                                first_cuts += 1
                             if depth > 0:
                                 hs[m] += depth * depth
                                 if KILLERS and m in quiet:
@@ -604,6 +614,7 @@ class StudentAgent(Agent):
         except _Timeout:
             pass
         self.last_nodes = nodes
+        self.last_stats = (tt_cuts, beta_cuts, first_cuts)
         if root_best:                                 # remember the position this move leaves
             idx = root_side * 3 + (root_best & 3) - 1
             flip = 1 << ((root_best >> 2) & 15)
