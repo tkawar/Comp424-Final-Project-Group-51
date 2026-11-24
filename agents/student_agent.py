@@ -615,6 +615,7 @@ class StudentAgent(Agent):
                     if can_move_pieces:             # no legal move at all: the rules say I lose
                         return -(WIN_SCORE - ply)
                     # Without board moves, having no move just passes the turn.
+                    # cannot use check_endgame here because it uses numpy boards, this uses bitboards.
                     return -negamax(1 - side, depth, -beta, -alpha, ply + 1, key ^ TURN_KEY)
 
             # ---- 5. Put the moves in a good order. Alpha-beta prunes the most when the best
