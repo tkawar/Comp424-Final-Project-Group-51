@@ -598,12 +598,14 @@ class StudentAgent(Agent):
             # ---- 3. Out of depth: stop and evaluate, unless the opponent threatens to win on
             # their next move. An evaluation in the middle of a threat would be misleading, so
             # in that case we keep searching a little deeper (at most THREAT_EXTRA_DEPTH moves).
-            #TODO 
-            # for gunes
+            if depth <= 0:
+                if depth <= -THREAT_EXTRA_DEPTH or not find_moves(1 - side, False, False)[0]:
+                    return evaluate(side) # no threat (or deep enough already)
+                    winning_move, captures, quiet, losing_move = find_moves(side, True, False)
+
 
             # ---- 4. Rare case: no moves in the lists.
-            #TODO
-            # for gunes
+            # TO DO
 
             # ---- 5. Put the moves in a good order. Alpha-beta prunes the most when the best
             # move is tried first. Order: the best move from the table, then captures, then
