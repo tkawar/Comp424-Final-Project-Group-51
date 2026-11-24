@@ -601,7 +601,7 @@ class StudentAgent(Agent):
             if depth <= 0:
                 if depth <= -THREAT_EXTRA_DEPTH or not find_moves(1 - side, False, False)[0]:
                     return evaluate(side) # no threat (or deep enough already)
-                    winning_move, captures, quiet, losing_move = find_moves(side, True, False)
+                winning_move, captures, quiet, losing_move = find_moves(side, True, False)
 
 
             # ---- 4. Rare case: no moves in the lists.
