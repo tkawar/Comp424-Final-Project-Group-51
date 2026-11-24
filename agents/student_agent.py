@@ -34,6 +34,21 @@ _CONTEMPT = 10                        # a draw is worth this much less than an e
 _VISIBLE = 3                          # evaluation: value of one more piece on top than the opponent
 _TEMPO = 3                            # evaluation: value of being the side to move
 _NEAR_END = 28                        # plies before the cap from which positions depend on the ply
+_LINE_BASE = (1, 4, 16)                # evaluation: value of 1, 2, 3, ... own top pieces in a line
+_BLOCK = (8, 4, 3, 2, 2)              # evaluation: eighths of that value left with 0, 1, ... opposing pieces
+_LINE_COUNT = 0                       # evaluation: value of each line a top piece stands on
+_VIS_SIZE = (0, 0, 0)                 # evaluation: extra value of a small / medium / large piece on top
+_RESERVE = (0, 0, 0)                  # evaluation: value of a small / medium / large piece in reserve
+_THREAT = 0                           # evaluation: value of a cell that would complete a line
+_BURIED = 8                           # evaluation: value of an opposing piece buried under one's own
+_KILLERS = 0                          # 1: try the quiet moves that cut off at this ply first
+_NULL_R = 0                           # null-move pruning reduction (0 = off)
+_FUT = 0                              # futility margin at depth 1 (0 = off)
+_LMR2 = 0                             # quiet moves this far after _LMR_FROM lose two plies (0 = off)
+_CHECK_EXT = 0                        # 1: search one ply deeper when the side to move is under threat
+_REP = 0                              # penalty for a root move into a position already played
+_HIST_INIT = 0                        # initial move-ordering value of each line through the target cell
+_NODE_LIMIT = 0                       # testing only: stop after this many positions (0 = use the clock)
 
 _EXACT, _LOWER, _UPPER = 0, 1, 2
 
@@ -92,19 +107,19 @@ def _line_table(win_length):
     opp_large - the opponent has a large piece on top in the line (it cannot be covered).
     my_large  - the same for the side to evaluate.
     """
-    base = [0] + [2 * 4 ** i for i in range(win_length - 1)] + [0, 0, 0]
+    base = ([0] + list(_LINE_BASE)[:win_length - 1] + [0] * 5)[:5]
 
     def value(own, other, blocked):
         if blocked or own == 0 or own >= win_length:
             return 0
-        return base[own] // (1 + other)               # every piece of the other side must be covered
+        return base[own] * _BLOCK[other] // 8         # every piece of the other side must be covered
 
     table = [0] * 100
     for a in range(5):
         for b in range(5):
             for ol in (0, 1):
                 for ml in (0, 1):
-                    table[a + 5 * b + 25 * ol + 50 * ml] = value(a, b, ol) - value(b, a, ml)
+                    table[a + 5 * b + 25 * ol + 50 * ml] = value(a, b, ol) - value(b, a, ml) + _LINE_COUNT * (a - b)
     return table
 
 
@@ -119,7 +134,10 @@ class StudentAgent(Agent):
         self.win, self.complete, self.masks = _tables(self.win_length)
         self.line_table = _line_table(self.win_length)
         self.tt = {}                                  # position -> (depth, flag, score, move)
-        self.hist = [[0] * 2048, [0] * 2048]          # history score of every move, per side
+        nlines = [sum(1 for mk in self.masks if mk >> c & 1) for c in range(_N)]
+        self.prior = [_HIST_INIT * nlines[(m >> 2) & 15] for m in range(2048)]
+        self.hist = [list(self.prior), list(self.prior)]   # history score of every move, per side
+        self.seen = {}                                # positions left after my moves -> times played
         self.calls = 0                                # number of step() calls so far
         self.last_depth = 0                           # depth finished by the last search (for tests)
         self.last_nodes = 0
@@ -204,10 +222,25 @@ class StudentAgent(Agent):
         if near_end or len(tt) > _TT_MAX:
             tt.clear()
         hist = self.hist
+        prior = self.prior
         for h in hist:
             for i, v in enumerate(h):
-                if v:
-                    h[i] = v >> 2
+                if v != prior[i]:
+                    h[i] = prior[i] + ((v - prior[i]) >> 2)
+        seen = self.seen
+        VS0, VS1, VS2 = _VIS_SIZE
+        RS0, RS1, RS2 = _RESERVE
+        THREAT = _THREAT
+        BURIED = _BURIED
+        EXTRA = bool(VS0 or VS1 or VS2 or RS0 or RS1 or RS2 or THREAT or BURIED)
+        KILLERS = _KILLERS
+        NULL_R = _NULL_R
+        FUT = _FUT
+        LMR2 = _LMR2
+        CHECK_EXT = _CHECK_EXT
+        REP = _REP
+        killers = [[0, 0] for _ in range(MAX_PLIES + 64)]
+        cur_depth = 1
 
         FREE = _FULL & ~obstacle
         WINT = self.win
@@ -215,6 +248,11 @@ class StudentAgent(Agent):
         LT = self.line_table
         live = [mk for mk in self.masks if not mk & obstacle]
         SIDEKEY = 1 << 96
+        TEMPO = _TEMPO
+        VISIBLE = _VISIBLE
+        EXT_LIMIT = _EXT_LIMIT
+        LMR_FROM = _LMR_FROM
+        NODE_LIMIT = _NODE_LIMIT
         perf = time.perf_counter
         tt_get = tt.get
         nodes = 0
@@ -360,22 +398,37 @@ class StudentAgent(Agent):
             """Return the value of the position for `side`, the side to move."""
             mi = side * 3
             oi = 3 - mi
+            mM = bb[mi + 1]; oM = bb[oi + 1]
             mL = bb[mi + 2]; oL = bb[oi + 2]
             nl = ~(mL | oL)
-            nm = nl & ~(bb[mi + 1] | bb[oi + 1])
-            mtop = mL | (bb[mi + 1] & nl) | (bb[mi] & nm)
-            otop = oL | (bb[oi + 1] & nl) | (bb[oi] & nm)
-            sc = _TEMPO + _VISIBLE * (mtop.bit_count() - otop.bit_count())
+            nm = nl & ~(mM | oM)
+            mMt = mM & nl; oMt = oM & nl
+            mSt = bb[mi] & nm; oSt = bb[oi] & nm
+            mtop = mL | mMt | mSt
+            otop = oL | oMt | oSt
+            sc = TEMPO + VISIBLE * (mtop.bit_count() - otop.bit_count())
             for mk in live:
                 sc += LT[(mtop & mk).bit_count() + 5 * (otop & mk).bit_count()
                          + (25 if oL & mk else 0) + (50 if mL & mk else 0)]
+            if EXTRA:
+                if VS0 or VS1 or VS2:
+                    sc += (VS0 * (mSt.bit_count() - oSt.bit_count()) + VS1 * (mMt.bit_count() - oMt.bit_count())
+                           + VS2 * (mL.bit_count() - oL.bit_count()))
+                if RS0 or RS1 or RS2:
+                    sc += (RS0 * (res[mi] - res[oi]) + RS1 * (res[mi + 1] - res[oi + 1])
+                           + RS2 * (res[mi + 2] - res[oi + 2]))
+                if THREAT:
+                    sc += THREAT * ((COMP[mtop] & FREE & ~oL).bit_count() - (COMP[otop] & FREE & ~mL).bit_count())
+                if BURIED:
+                    sc += BURIED * (((bb[oi] & (mM | mL)) | (oM & mL)).bit_count()
+                                    - ((bb[mi] & (oM | oL)) | (mM & oL)).bit_count())
             return sc
 
         def negamax(side, depth, alpha, beta, ply, key):
             """Return the value for `side`, to move in a position where nobody has a line."""
             nonlocal nodes, root_best
             nodes += 1
-            if not nodes & 1023 and perf() > deadline:
+            if not nodes & 1023 and (perf() > deadline or (NODE_LIMIT and nodes >= NODE_LIMIT)):
                 raise _Timeout
             if ply >= plies_left:                     # the ply cap: a draw
                 return -_CONTEMPT if side == root_side else _CONTEMPT
@@ -408,7 +461,7 @@ class StudentAgent(Agent):
 
             if depth <= 0:
                 # Quiet unless the opponent threatens to win at once: then look at the replies.
-                if depth <= -_EXT_LIMIT or not gen(1 - side, False, False)[0]:
+                if depth <= -EXT_LIMIT or not gen(1 - side, False, False)[0]:
                     return evaluate(side)
                 win, caps, quiet, loser = gen(side, True, False)
 
@@ -423,12 +476,33 @@ class StudentAgent(Agent):
                         return -(_WIN - ply)
                     return -negamax(1 - side, depth, -beta, -alpha, ply + 1, key ^ SIDEKEY)   # a pass
 
+            other = 1 - side
+            best = -_INF
+            if depth > 0 and ply:
+                if CHECK_EXT and ply < 2 * cur_depth + 2 and gen(other, False, False)[0]:
+                    depth += 1                        # under threat: the replies are forced
+                elif NULL_R and depth >= 3 and beta - alpha == 1 and -_MATE < beta < _MATE:
+                    v = -negamax(other, depth - 1 - NULL_R, -beta, 1 - beta, ply + 1, key ^ SIDEKEY)
+                    if beta <= v < _MATE:
+                        return v
+                if FUT and depth == 1:
+                    se = evaluate(side) + FUT
+                    if se <= alpha:                   # quiet moves will not reach alpha
+                        quiet = []
+                        best = se
+
             hs = hist[side]
             hget = hs.__getitem__
             if len(caps) > 1:
                 caps.sort(key=hget, reverse=True)
             quiet.sort(key=hget, reverse=True)
-            late = len(caps) + _LMR_FROM
+            if KILLERS:
+                kl = killers[ply]
+                for km in (kl[1], kl[0]):
+                    if km and km in quiet:
+                        quiet.remove(km)
+                        quiet.insert(0, km)
+            late = len(caps) + LMR_FROM
             moves = caps + quiet
             if ttm:
                 try:
@@ -440,11 +514,10 @@ class StudentAgent(Agent):
                     late += 1
 
             mi = side * 3
-            other = 1 - side
             alpha0 = alpha
-            best = -_INF
             best_move = 0
             i = 0
+            pen = 0
             for m in moves:
                 idx = mi + (m & 3) - 1
                 db = 1 << ((m >> 2) & 15)
@@ -458,13 +531,18 @@ class StudentAgent(Agent):
                     res[idx] -= 1
                 k2 = key ^ (flip << (idx * 16)) ^ SIDEKEY
 
+                if not ply and REP:
+                    pen = REP * seen.get(k2, 0)       # do not walk back into a position already played
                 if i == 0:
-                    v = -negamax(other, depth - 1, -beta, -alpha, ply + 1, k2)
+                    v = -negamax(other, depth - 1, -beta - pen, -alpha - pen, ply + 1, k2) - pen
                 else:
-                    r = 1 if depth >= 3 and i >= late else 0
-                    v = -negamax(other, depth - 1 - r, -alpha - 1, -alpha, ply + 1, k2)
+                    if depth >= 3 and i >= late:
+                        r = 2 if LMR2 and depth >= 5 and i >= late + LMR2 else 1
+                    else:
+                        r = 0
+                    v = -negamax(other, depth - 1 - r, -alpha - 1 - pen, -alpha - pen, ply + 1, k2) - pen
                     if v > alpha and (r or v < beta):
-                        v = -negamax(other, depth - 1, -beta, -alpha, ply + 1, k2)
+                        v = -negamax(other, depth - 1, -beta - pen, -alpha - pen, ply + 1, k2) - pen
 
                 bb[idx] ^= flip
                 if not src:
@@ -480,6 +558,11 @@ class StudentAgent(Agent):
                         if v >= beta:
                             if depth > 0:
                                 hs[m] += depth * depth
+                                if KILLERS and m in quiet:
+                                    kl = killers[ply]
+                                    if kl[0] != m:
+                                        kl[1] = kl[0]
+                                        kl[0] = m
                             break
                 i += 1
 
@@ -504,6 +587,7 @@ class StudentAgent(Agent):
         self.last_depth = 0
         try:
             for depth in range(1, plies_left + 1):
+                cur_depth = depth
                 v = negamax(root_side, depth, -_INF, _INF, 0, key)
                 self.last_depth = depth
                 if v > _MATE or v < -_MATE:           # a forced win or loss: nothing more to find
@@ -511,4 +595,11 @@ class StudentAgent(Agent):
         except _Timeout:
             pass
         self.last_nodes = nodes
+        if root_best:                                 # remember the position this move leaves
+            idx = root_side * 3 + (root_best & 3) - 1
+            flip = 1 << ((root_best >> 2) & 15)
+            if root_best >> 6:
+                flip |= 1 << ((root_best >> 6) - 1)
+            k2 = key ^ (flip << (idx * 16)) ^ SIDEKEY
+            seen[k2] = seen.get(k2, 0) + 1
         return root_best
