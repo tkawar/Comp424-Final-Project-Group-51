@@ -41,6 +41,8 @@ _VIS_SIZE = (0, 0, 0)                 # evaluation: extra value of a small / med
 _RESERVE = (0, 0, 0)                  # evaluation: value of a small / medium / large piece in reserve
 _THREAT = 0                           # evaluation: value of a cell that would complete a line
 _BURIED = 8                           # evaluation: value of an opposing piece buried under one's own
+_BURIED_M = 8                         # evaluation: extra value when the buried piece is a medium
+_SELF_BURY = 0                        # evaluation: cost of a piece buried under one's own piece
 _KILLERS = 0                          # 1: try the quiet moves that cut off at this ply first
 _NULL_R = 0                           # null-move pruning reduction (0 = off)
 _FUT = 0                              # futility margin at depth 1 (0 = off)
@@ -232,7 +234,9 @@ class StudentAgent(Agent):
         RS0, RS1, RS2 = _RESERVE
         THREAT = _THREAT
         BURIED = _BURIED
-        EXTRA = bool(VS0 or VS1 or VS2 or RS0 or RS1 or RS2 or THREAT or BURIED)
+        BURIED_M = _BURIED_M
+        SELF_BURY = _SELF_BURY
+        EXTRA = bool(VS0 or VS1 or VS2 or RS0 or RS1 or RS2 or THREAT or BURIED or BURIED_M or SELF_BURY)
         KILLERS = _KILLERS
         NULL_R = _NULL_R
         FUT = _FUT
@@ -422,6 +426,11 @@ class StudentAgent(Agent):
                 if BURIED:
                     sc += BURIED * (((bb[oi] & (mM | mL)) | (oM & mL)).bit_count()
                                     - ((bb[mi] & (oM | oL)) | (mM & oL)).bit_count())
+                if BURIED_M:
+                    sc += BURIED_M * ((oM & mL).bit_count() - (mM & oL).bit_count())
+                if SELF_BURY:
+                    sc -= SELF_BURY * (((bb[mi] & (mM | mL)) | (mM & mL)).bit_count()
+                                       - ((bb[oi] & (oM | oL)) | (oM & oL)).bit_count())
             return sc
 
         def negamax(side, depth, alpha, beta, ply, key):
